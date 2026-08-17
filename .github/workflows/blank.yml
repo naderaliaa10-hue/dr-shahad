@@ -2,106 +2,194 @@ name: Build Dr Shahad APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project
+      - name: Show repository files
+        shell: bash
         run: |
-          mkdir -p extracted
-          unzip -q Dr_Shahad_Cloud_Build.zip -d extracted
+          set -e
+          echo "Repository:"
+          pwd
+          echo
+          find . -maxdepth 3 -type f -print | sort | head -300
 
-          PROJECT=$(find extracted -name pubspec.yaml -type f | head -1 | xargs dirname)
+      - name: Find project ZIP
+        shell: bash
+        run: |
+          set -e
 
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: pubspec.yaml not found"
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file was found in the repository."
+            echo "ZIP files in repository:"
+            find . -type f -iname '*.zip' -print
             exit 1
           fi
 
-          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          echo "ZIP found: $ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
-      - name: Setup latest stable Flutter
+      - name: Extract Flutter project
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "Extraction completed."
+          echo
+          echo "Extracted structure:"
+          find extracted -maxdepth 4 -type f -print | sort | head -300
+
+      - name: Find Flutter project
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT_DIR="$(find "$GITHUB_WORKSPACE/extracted" \
+            -type f \
+            -name 'pubspec.yaml' \
+            -not -path '*/.dart_tool/*' \
+            -print \
+            -quit | xargs -r dirname)"
+
+          if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/pubspec.yaml" ]; then
+            echo "ERROR: pubspec.yaml was not found."
+            echo "Available pubspec files:"
+            find "$GITHUB_WORKSPACE/extracted" -type f -name 'pubspec.yaml' -print
+            exit 1
+          fi
+
+          echo "Flutter project found:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Validate Flutter project
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          echo "Project directory:"
+          pwd
+
+          echo
+          echo "Project files:"
+          ls -la
+
+          echo
+          echo "pubspec.yaml:"
+          sed -n '1,220p' pubspec.yaml
+
+          if [ ! -d "android" ]; then
+            echo "ERROR: android directory is missing."
+            exit 1
+          fi
+
+          if [ ! -d "lib" ]; then
+            echo "ERROR: lib directory is missing."
+            exit 1
+          fi
+
+          if [ ! -f "lib/main.dart" ]; then
+            echo "ERROR: lib/main.dart is missing."
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.7'
           channel: stable
+          cache: true
 
-      - name: Create modern Android project
+      - name: Flutter version
+        shell: bash
         run: |
-          rm -rf dr_shahad
-          mkdir dr_shahad
+          flutter --version
+          dart --version
 
-          cp -R "$PROJECT"/. dr_shahad/
-
-          cd dr_shahad
-
-          # Valid Dart package name
-          sed -i 's/^name:.*/name: dr_shahad/' pubspec.yaml
-
-          # Remove every old Android configuration
-          rm -rf android
-
-          # Create completely new Android v2 project
-          flutter create \
-            --platforms=android \
-            --org com.drshahad \
-            .
-
-      - name: Update modern dependencies
-        working-directory: dr_shahad
+      - name: Flutter clean
+        shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("pubspec.yaml")
-          s = p.read_text()
-
-          # Replace old record dependency if present
-          import re
-          s = re.sub(
-              r'(?m)^\s*record:\s*[^\n]+',
-              '  record: ^7.1.1',
-              s
-          )
-
-          # Add dependency overrides so old record_android
-          # can never be selected.
-          if "dependency_overrides:" in s:
-              s = re.sub(
-                  r'dependency_overrides:.*',
-                  'dependency_overrides:\n  record_android: ^2.1.2',
-                  s,
-                  flags=re.S
-              )
-          else:
-              s += "\n\ndependency_overrides:\n  record_android: ^2.1.2\n"
-
-          p.write_text(s)
-          PY
-
-          rm -f pubspec.lock
+          cd "$PROJECT_DIR"
           flutter clean
+
+      - name: Get dependencies
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
           flutter pub get
 
-      - name: Verify dependency versions
-        working-directory: dr_shahad
+      - name: Analyze project
+        shell: bash
         run: |
-          echo "Installed record packages:"
-          flutter pub deps | grep -E "record|record_android" || true
+          cd "$PROJECT_DIR"
+          dart analyze lib
 
-      - name: Build modern release APK
-        working-directory: dr_shahad
+      - name: Build release APK
+        shell: bash
         run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
           flutter build apk --release
+
+      - name: Locate APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find "$PROJECT_DIR/build/app/outputs/apk/release" \
+            -type f \
+            -name '*.apk' \
+            -print \
+            -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK generated:"
+          ls -lh "$APK"
+
+          mkdir -p "$GITHUB_WORKSPACE/apk"
+
+          cp "$APK" "$GITHUB_WORKSPACE/apk/Dr-Shahad-release.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: dr-shahad-apk
-          path: dr_shahad/build/app/outputs/flutter-apk/app-release.apk
+          name: Dr-Shahad-APK
+          path: apk/Dr-Shahad-release.apk
           if-no-files-found: error
+          retention-days: 30
