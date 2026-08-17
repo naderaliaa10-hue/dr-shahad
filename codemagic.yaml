@@ -1,259 +1,48 @@
 workflows:
   dr-shahad-android:
-    name: Dr Shahad Android APK
-    max_build_duration: 120
+    name: Dr Shahad Android
     instance_type: mac_mini_m2
+    max_build_duration: 120
 
     environment:
       flutter: stable
 
     scripts:
-
-      - name: Extract Flutter project
+      - name: Extract ZIP
         script: |
-          set -euo pipefail
+          set -e
 
-          echo "========================================"
-          echo "DR SHAHAD - EXTRACTING PROJECT"
-          echo "========================================"
-
-          rm -rf extracted
           mkdir -p extracted
 
-          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' -print -quit)"
+          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            echo "Repository contents:"
-            find . -maxdepth 3 -type f -print
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
-
-          echo "Found ZIP:"
-          echo "$ZIP_FILE"
 
           unzip -q "$ZIP_FILE" -d extracted
 
-          PROJECT_DIR="$(find extracted -type f -name pubspec.yaml -print -quit | xargs -r dirname)"
+          PROJECT_DIR=$(find extracted -type f -name "pubspec.yaml" -print -quit)
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: pubspec.yaml was not found inside the ZIP."
-
-            echo "Extracted files:"
-            find extracted -maxdepth 6 -type f -print | head -300
-
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
-          echo "Flutter project:"
-          echo "$PROJECT_DIR"
+          PROJECT_DIR=$(dirname "$PROJECT_DIR")
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$CM_ENV"
 
-          echo "Flutter project verified."
-
-      - name: Recreate modern Android project
+      - name: Build APK
         script: |
-          set -euo pipefail
-
-          echo "========================================"
-          echo "DR SHAHAD - RECREATING ANDROID"
-          echo "========================================"
-
-          PROJECT_DIR="$(find extracted -type f -name pubspec.yaml -print -quit | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Cannot find Flutter project."
-            exit 1
-          fi
+          set -e
 
           cd "$PROJECT_DIR"
 
-          echo "Project:"
-          pwd
-
-          if [ ! -f pubspec.yaml ]; then
-            echo "ERROR: pubspec.yaml missing."
-            exit 1
-          fi
-
-          rm -rf android
-
-          flutter create \
-            --platforms=android \
-            --project-name=dr_shahad \
-            .
-
-          if [ ! -f android/app/build.gradle ] && [ ! -f android/app/build.gradle.kts ]; then
-            echo "ERROR: Android project was not generated."
-            exit 1
-          fi
-
-          echo "Modern Android project generated successfully."
-
-      - name: Configure Android SDK
-        script: |
-          set -euo pipefail
-
-          echo "========================================"
-          echo "DR SHAHAD - CONFIGURING ANDROID"
-          echo "========================================"
-
-          PROJECT_DIR="$(find extracted -type f -name pubspec.yaml -print -quit | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Cannot find Flutter project."
-            exit 1
-          fi
-
-          cd "$PROJECT_DIR"
-
-          if [ -f android/app/build.gradle ]; then
-
-            python3 <<'PY'
-from pathlib import Path
-import re
-
-p = Path("android/app/build.gradle")
-s = p.read_text()
-
-s = re.sub(
-    r'compileSdk\s*=\s*flutter\.compileSdkVersion',
-    'compileSdk = 36',
-    s
-)
-
-s = re.sub(
-    r'compileSdk\s+flutter\.compileSdkVersion',
-    'compileSdk 36',
-    s
-)
-
-s = re.sub(
-    r'minSdk\s*=\s*flutter\.minSdkVersion',
-    'minSdk = 23',
-    s
-)
-
-s = re.sub(
-    r'minSdkVersion\s+flutter\.minSdkVersion',
-    'minSdkVersion 23',
-    s
-)
-
-s = re.sub(
-    r'targetSdk\s*=\s*flutter\.targetSdkVersion',
-    'targetSdk = 36',
-    s
-)
-
-s = re.sub(
-    r'targetSdkVersion\s+flutter\.targetSdkVersion',
-    'targetSdkVersion 36',
-    s
-)
-
-p.write_text(s)
-PY
-
-          elif [ -f android/app/build.gradle.kts ]; then
-
-            python3 <<'PY'
-from pathlib import Path
-
-p = Path("android/app/build.gradle.kts")
-s = p.read_text()
-
-s = s.replace(
-    "compileSdk = flutter.compileSdkVersion",
-    "compileSdk = 36"
-)
-
-s = s.replace(
-    "minSdk = flutter.minSdkVersion",
-    "minSdk = 23"
-)
-
-s = s.replace(
-    "targetSdk = flutter.targetSdkVersion",
-    "targetSdk = 36"
-)
-
-p.write_text(s)
-PY
-
-          else
-            echo "ERROR: Android build file not found."
-            exit 1
-          fi
-
-          echo "Android SDK configured."
-
-      - name: Get Flutter dependencies
-        script: |
-          set -euo pipefail
-
-          PROJECT_DIR="$(find extracted -type f -name pubspec.yaml -print -quit | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Cannot find Flutter project."
-            exit 1
-          fi
-
-          cd "$PROJECT_DIR"
-
-          flutter clean
           flutter pub get
 
-      - name: Analyze Flutter project
-        script: |
-          set -euo pipefail
-
-          PROJECT_DIR="$(find extracted -type f -name pubspec.yaml -print -quit | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Cannot find Flutter project."
-            exit 1
-          fi
-
-          cd "$PROJECT_DIR"
-
-          echo "========================================"
-          echo "RUNNING FLUTTER ANALYZE"
-          echo "========================================"
-
-          flutter analyze --no-fatal-infos
-
-      - name: Build release APK
-        script: |
-          set -euo pipefail
-
-          PROJECT_DIR="$(find extracted -type f -name pubspec.yaml -print -quit | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Cannot find Flutter project."
-            exit 1
-          fi
-
-          cd "$PROJECT_DIR"
-
-          echo "========================================"
-          echo "BUILDING DR SHAHAD APK"
-          echo "========================================"
-
           flutter build apk --release
-
-          APK="$(find build/app/outputs/flutter-apk -type f -name '*.apk' -print -quit)"
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "========================================"
-          echo "BUILD SUCCESSFUL"
-          echo "========================================"
-          echo "APK: $APK"
 
     artifacts:
       - "**/build/app/outputs/flutter-apk/*.apk"
