@@ -2,20 +2,16 @@ workflows:
   dr-shahad-android:
     name: Dr Shahad Android APK
     max_build_duration: 120
-    instance_type: mac_mini_m2
 
     environment:
       flutter: stable
 
     scripts:
-
-      - name: Extract Flutter project
+      - name: Extract project
         script: |
           set -e
 
-          echo "========================================"
-          echo "EXTRACTING DR SHAHAD PROJECT"
-          echo "========================================"
+          echo "=== EXTRACTING PROJECT ==="
 
           rm -rf extracted
           mkdir -p extracted
@@ -23,7 +19,7 @@ workflows:
           ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" -print -quit)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found."
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
 
@@ -34,7 +30,7 @@ workflows:
           PUBSPEC=$(find extracted -type f -name "pubspec.yaml" -print -quit)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found inside ZIP."
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
@@ -42,21 +38,18 @@ workflows:
 
           echo "PROJECT_DIR=$PROJECT_DIR"
 
-          echo "Project files:"
-          ls -la "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$CM_ENV"
 
-      - name: Recreate modern Android project
+      - name: Create modern Android project
         script: |
           set -e
 
-          echo "========================================"
-          echo "CREATING MODERN ANDROID PROJECT"
-          echo "========================================"
+          echo "=== CREATING MODERN ANDROID PROJECT ==="
 
           PUBSPEC=$(find extracted -type f -name "pubspec.yaml" -print -quit)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found."
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
@@ -64,37 +57,30 @@ workflows:
 
           cd "$PROJECT_DIR"
 
-          echo "Flutter project:"
+          echo "Project:"
           pwd
 
-          echo "Removing old Android project..."
           rm -rf android
 
-          echo "Generating Android project using current Flutter..."
-          flutter create \
-            --platforms=android \
-            --project-name=dr_shahad \
-            .
+          flutter create --platforms=android --project-name=dr_shahad .
 
           if [ ! -f android/app/build.gradle ] && [ ! -f android/app/build.gradle.kts ]; then
-            echo "ERROR: Android project generation failed."
+            echo "ERROR: Android project was not created"
             exit 1
           fi
 
-          echo "Modern Android project created."
+          echo "Modern Android project created successfully"
 
       - name: Configure Android SDK
         script: |
           set -e
 
-          echo "========================================"
-          echo "CONFIGURING ANDROID SDK"
-          echo "========================================"
+          echo "=== CONFIGURING ANDROID SDK ==="
 
           PUBSPEC=$(find extracted -type f -name "pubspec.yaml" -print -quit)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found."
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
@@ -103,94 +89,33 @@ workflows:
           cd "$PROJECT_DIR"
 
           if [ -f android/app/build.gradle ]; then
-
-            python3 <<'PY'
-from pathlib import Path
-import re
-
-p = Path("android/app/build.gradle")
-s = p.read_text()
-
-s = re.sub(
-    r'compileSdk\s*=\s*flutter\.compileSdkVersion',
-    'compileSdk = 36',
-    s
-)
-
-s = re.sub(
-    r'compileSdk\s+flutter\.compileSdkVersion',
-    'compileSdk 36',
-    s
-)
-
-s = re.sub(
-    r'minSdk\s*=\s*flutter\.minSdkVersion',
-    'minSdk = 23',
-    s
-)
-
-s = re.sub(
-    r'minSdkVersion\s+flutter\.minSdkVersion',
-    'minSdkVersion 23',
-    s
-)
-
-s = re.sub(
-    r'targetSdk\s*=\s*flutter\.targetSdkVersion',
-    'targetSdk = 36',
-    s
-)
-
-s = re.sub(
-    r'targetSdkVersion\s+flutter\.targetSdkVersion',
-    'targetSdkVersion 36',
-    s
-)
-
-p.write_text(s)
-PY
-
-          elif [ -f android/app/build.gradle.kts ]; then
-
-            python3 <<'PY'
-from pathlib import Path
-
-p = Path("android/app/build.gradle.kts")
-s = p.read_text()
-
-s = s.replace(
-    "compileSdk = flutter.compileSdkVersion",
-    "compileSdk = 36"
-)
-
-s = s.replace(
-    "minSdk = flutter.minSdkVersion",
-    "minSdk = 23"
-)
-
-s = s.replace(
-    "targetSdk = flutter.targetSdkVersion",
-    "targetSdk = 36"
-)
-
-p.write_text(s)
-PY
-
-          else
-            echo "ERROR: Android build file not found."
-            exit 1
+            sed -i.bak \
+              -e 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/g' \
+              -e 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' \
+              -e 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/g' \
+              android/app/build.gradle
           fi
 
-          echo "Android SDK configuration completed."
+          if [ -f android/app/build.gradle.kts ]; then
+            sed -i.bak \
+              -e 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/g' \
+              -e 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' \
+              -e 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/g' \
+              android/app/build.gradle.kts
+          fi
+
+          echo "Android SDK configured"
 
       - name: Get dependencies
         script: |
           set -e
 
+          echo "=== GETTING DEPENDENCIES ==="
+
           PUBSPEC=$(find extracted -type f -name "pubspec.yaml" -print -quit)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found."
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
@@ -205,14 +130,12 @@ PY
         script: |
           set -e
 
-          echo "========================================"
-          echo "BUILDING DR SHAHAD APK"
-          echo "========================================"
+          echo "=== BUILDING DR SHAHAD APK ==="
 
           PUBSPEC=$(find extracted -type f -name "pubspec.yaml" -print -quit)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found."
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
@@ -220,31 +143,16 @@ PY
 
           cd "$PROJECT_DIR"
 
-          echo "Project:"
-          pwd
-
-          echo "Flutter version:"
-          flutter --version
-
-          echo "Building release APK..."
-
           flutter build apk --release
 
-          APK=$(find build/app/outputs/flutter-apk \
-            -type f \
-            -name "*.apk" \
-            -print \
-            -quit)
+          APK=$(find build/app/outputs/flutter-apk -type f -name "*.apk" -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
+            echo "ERROR: APK was not generated"
             exit 1
           fi
 
-          echo "========================================"
-          echo "BUILD SUCCESSFUL"
-          echo "========================================"
-          echo "APK:"
+          echo "=== BUILD SUCCESSFUL ==="
           echo "$APK"
 
     artifacts:
