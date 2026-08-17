@@ -92,10 +92,25 @@ workflows:
 
           echo "=== VERIFYING MODERN ANDROID PROJECT ==="
 
-          test -f android/settings.gradle.kts
-          test -f android/app/build.gradle.kts
-          test -f android/build.gradle.kts
-          test -f android/gradle/wrapper/gradle-wrapper.properties
+          if [ ! -f android/settings.gradle.kts ]; then
+            echo "ERROR: android/settings.gradle.kts not found."
+            exit 1
+          fi
+
+          if [ ! -f android/app/build.gradle.kts ]; then
+            echo "ERROR: android/app/build.gradle.kts not found."
+            exit 1
+          fi
+
+          if [ ! -f android/build.gradle.kts ]; then
+            echo "ERROR: android/build.gradle.kts not found."
+            exit 1
+          fi
+
+          if [ ! -f android/gradle/wrapper/gradle-wrapper.properties ]; then
+            echo "ERROR: Gradle wrapper not found."
+            exit 1
+          fi
 
           echo "=== MODERN ANDROID PROJECT VERIFIED ==="
 
@@ -173,7 +188,7 @@ workflows:
           flutter pub deps --style=compact
 
 
-      - name: Fix project test files
+      - name: Fix generated test
         script: |
           set -euo pipefail
 
@@ -182,16 +197,56 @@ workflows:
 
           cd "$PROJECT_DIR"
 
-          echo "=== REMOVING DEFAULT FLUTTER TEST ==="
+          echo "=== REMOVING INVALID DEFAULT TEST ==="
 
           rm -f test/widget_test.dart
 
           echo "Default widget test removed."
 
-          echo "=== VERIFYING TEST DIRECTORY ==="
 
-          if [ -d test ]; then
-            find test -maxdepth 2 -type f -print || true
+      - name: Fix unused imports
+        script: |
+          set -euo pipefail
+
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          cd "$PROJECT_DIR"
+
+          echo "=== FIXING UNUSED IMPORTS ==="
+
+          if [ -f lib/main.dart ]; then
+            sed -i "/^import 'dart:typed_data';$/d" lib/main.dart
+          fi
+
+          if [ -f lib/services/voice_service.dart ]; then
+            sed -i "/^import 'package:record\/record.dart';$/d" \
+              lib/services/voice_service.dart
+          fi
+
+          echo "Unused imports removed."
+
+
+      - name: Verify Dart files
+        script: |
+          set -euo pipefail
+
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          cd "$PROJECT_DIR"
+
+          echo "=== VERIFYING PROJECT FILES ==="
+
+          test -f pubspec.yaml
+          test -f lib/main.dart
+
+          echo "pubspec.yaml: OK"
+          echo "lib/main.dart: OK"
+
+          if [ -d lib ]; then
+            echo "=== LIB DIRECTORY ==="
+            find lib -maxdepth 3 -type f -name '*.dart' -print
           fi
 
 
@@ -211,6 +266,8 @@ workflows:
           echo "=== DART ANALYSIS ==="
 
           flutter analyze --no-fatal-infos
+
+          echo "=== ANALYSIS PASSED ==="
 
 
       - name: Build release APK
