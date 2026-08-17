@@ -8,36 +8,56 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract project
         run: |
           mkdir project
           unzip -q Dr_Shahad_Cloud_Build.zip -d project
-          find project -maxdepth 3 -type f | head -100
 
-      - name: Find Flutter project
-        run: |
+          echo "Searching for Flutter project..."
           PROJECT=$(find project -name pubspec.yaml -type f | head -1 | xargs dirname)
-          echo "PROJECT=$PROJECT" >> $GITHUB_ENV
 
-      - name: Set up Flutter
+          if [ -z "$PROJECT" ]; then
+            echo "Flutter project not found"
+            exit 1
+          fi
+
+          echo "Flutter project found at: $PROJECT"
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
           channel: stable
 
+      - name: Check Flutter project
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          flutter --version
+          echo "Project files:"
+          ls -la
+
+      - name: Upgrade Android project
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          flutter create --platforms=android .
+
       - name: Get dependencies
         working-directory: ${{ env.PROJECT }}
-        run: flutter pub get
+        run: |
+          flutter pub get
 
-      - name: Build APK
+      - name: Build release APK
         working-directory: ${{ env.PROJECT }}
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: dr-shahad-apk
           path: ${{ env.PROJECT }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
