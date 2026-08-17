@@ -1,4 +1,4 @@
-name: Dr Shahad - Android APK
+name: Dr Shahad - Build APK
 
 on:
   workflow_dispatch:
@@ -12,46 +12,73 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================
+      # 1. GitHub repository
+      # ============================================
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find ZIP
+      # ============================================
+      # 2. Find ZIP
+      # ============================================
+      - name: Find project ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+          ZIP_FILE="$(find "$GITHUB_WORKSPACE" \
+            -maxdepth 1 \
+            -type f \
+            -iname "*.zip" \
+            -print \
+            -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: No ZIP file found."
             exit 1
           fi
 
-          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-          echo "Using: $ZIP_FILE"
+          echo "Found ZIP:"
+          echo "$ZIP_FILE"
 
-      - name: Extract ZIP
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      # ============================================
+      # 3. Extract ZIP
+      # ============================================
+      - name: Extract project
         shell: bash
         run: |
           set -euo pipefail
 
           rm -rf "$GITHUB_WORKSPACE/extracted"
+
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
-          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
+          unzip -q "$ZIP_FILE" \
+            -d "$GITHUB_WORKSPACE/extracted"
 
-      - name: Find Flutter project
+          echo "ZIP extracted successfully."
+
+      # ============================================
+      # 4. Find Flutter project
+      # ============================================
+      - name: Locate Flutter project
         shell: bash
         run: |
           set -euo pipefail
 
           PUBSPEC="$(find "$GITHUB_WORKSPACE/extracted" \
             -type f \
-            -name pubspec.yaml \
-            -print -quit)"
+            -name "pubspec.yaml" \
+            -not -path "*/.dart_tool/*" \
+            -print \
+            -quit)"
 
           if [ -z "$PUBSPEC" ]; then
             echo "ERROR: pubspec.yaml not found."
@@ -60,200 +87,258 @@ jobs:
 
           PROJECT_DIR="$(dirname "$PUBSPEC")"
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
           echo "Flutter project:"
           echo "$PROJECT_DIR"
 
-      - name: Validate project
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      # ============================================
+      # 5. Validate Flutter files
+      # ============================================
+      - name: Validate Flutter project
         shell: bash
         run: |
           set -euo pipefail
 
-          test -f "$PROJECT_DIR/pubspec.yaml"
-          test -f "$PROJECT_DIR/lib/main.dart"
-          test -d "$PROJECT_DIR/android"
+          cd "$PROJECT_DIR"
 
-          echo "Project validation OK."
+          if [ ! -f pubspec.yaml ]; then
+            echo "ERROR: pubspec.yaml missing."
+            exit 1
+          fi
 
+          if [ ! -f lib/main.dart ]; then
+            echo "ERROR: lib/main.dart missing."
+            exit 1
+          fi
+
+          echo "Flutter project OK."
+
+      # ============================================
+      # 6. Java 17
+      # ============================================
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # ============================================
+      # 7. Flutter stable
+      # ============================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Fix Android Gradle files
+      # ============================================
+      # 8. Show versions
+      # ============================================
+      - name: Show Flutter and Java versions
+        shell: bash
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      # ============================================
+      # 9. Remove OLD Android project
+      # ============================================
+      - name: Remove old Android build files
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 - "$PROJECT_DIR" <<'PY'
+          cd "$PROJECT_DIR"
+
+          echo "Removing old Android project..."
+
+          rm -rf android
+
+          echo "Old Android project removed."
+
+      # ============================================
+      # 10. Generate NEW Android project
+      # ============================================
+      - name: Generate modern Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          echo "Generating Android project using current Flutter..."
+
+          flutter create \
+            --platforms=android \
+            --project-name=dr_shahad \
+            .
+
+          echo "Modern Android project generated."
+
+      # ============================================
+      # 11. Configure Android SDK
+      # ============================================
+      - name: Configure Android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_GRADLE="$PROJECT_DIR/android/app/build.gradle"
+
+          if [ ! -f "$APP_GRADLE" ]; then
+            echo "ERROR: app/build.gradle was not generated."
+            exit 1
+          fi
+
+          echo "Configuring Android SDK..."
+
+          python3 - "$APP_GRADLE" <<'PY'
           import sys
           from pathlib import Path
           import re
 
-          project = Path(sys.argv[1])
-          android = project / "android"
+          path = Path(sys.argv[1])
+          text = path.read_text()
 
-          settings = android / "settings.gradle"
-          settings_kts = android / "settings.gradle.kts"
+          # Compile SDK
+          text = re.sub(
+              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+              'compileSdk = 36',
+              text
+          )
 
-          wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
+          text = re.sub(
+              r'compileSdk\s+flutter\.compileSdkVersion',
+              'compileSdk 36',
+              text
+          )
 
-          # -----------------------------------------
-          # AGP 8.11.1
-          # -----------------------------------------
+          # Minimum Android version
+          text = re.sub(
+              r'minSdk\s*=\s*flutter\.minSdkVersion',
+              'minSdk = 23',
+              text
+          )
 
-          if settings.exists():
-              text = settings.read_text()
+          text = re.sub(
+              r'minSdkVersion\s+flutter\.minSdkVersion',
+              'minSdkVersion 23',
+              text
+          )
 
-              text = re.sub(
-                  r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])[^"\']+(["\'])',
-                  r'\g<1>8.11.1\2',
-                  text
-              )
-
-              text = re.sub(
-                  r'(id\s+["\']com\.android\.library["\']\s+version\s+["\'])[^"\']+(["\'])',
-                  r'\g<1>8.11.1\2',
-                  text
-              )
-
-              settings.write_text(text)
-
-          if settings_kts.exists():
-              text = settings_kts.read_text()
-
-              text = re.sub(
-                  r'(id\("com\.android\.application"\)\s*version\s*")[^"]+(")',
-                  r'\g<1>8.11.1\2',
-                  text
-              )
-
-              text = re.sub(
-                  r'(id\("com\.android\.library"\)\s*version\s*")[^"]+(")',
-                  r'\g<1>8.11.1\2',
-                  text
-              )
-
-              settings_kts.write_text(text)
-
-          # -----------------------------------------
-          # Gradle 8.14
-          # -----------------------------------------
-
-          wrapper.parent.mkdir(parents=True, exist_ok=True)
-
-          lines = []
-
-          if wrapper.exists():
-              lines = wrapper.read_text().splitlines()
-
-          found = False
-
-          for i, line in enumerate(lines):
-              if line.startswith("distributionUrl="):
-                  lines[i] = (
-                      "distributionUrl="
-                      "https\\://services.gradle.org/distributions/"
-                      "gradle-8.14-bin.zip"
-                  )
-                  found = True
-
-          if not found:
-              lines.append(
-                  "distributionUrl="
-                  "https\\://services.gradle.org/distributions/"
-                  "gradle-8.14-bin.zip"
-              )
-
-          wrapper.write_text("\n".join(lines) + "\n")
-
-          print("\n===== FINAL settings.gradle =====")
-
-          if settings.exists():
-              print(settings.read_text())
-
-          print("\n===== FINAL gradle-wrapper.properties =====")
-          print(wrapper.read_text())
+          path.write_text(text)
           PY
 
-      - name: Verify Gradle wrapper
+          echo "Android configuration completed."
+
+      # ============================================
+      # 12. AndroidX
+      # ============================================
+      - name: Configure AndroidX
         shell: bash
         run: |
           set -euo pipefail
 
-          cd "$PROJECT_DIR/android"
+          PROPERTIES="$PROJECT_DIR/android/gradle.properties"
 
-          chmod +x gradlew
+          cat >> "$PROPERTIES" <<'EOF'
 
-          echo "===== Gradle wrapper URL ====="
-          grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx4G -Dfile.encoding=UTF-8
+          EOF
 
-          echo
-          echo "===== Gradle version actually used ====="
-          ./gradlew --version
+          echo "AndroidX configured."
 
-      - name: Flutter clean
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          flutter clean
-
+      # ============================================
+      # 13. Dependencies
+      # ============================================
       - name: Flutter pub get
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
+
           flutter pub get
 
+      # ============================================
+      # 14. Check Dart
+      # ============================================
       - name: Dart analysis
         shell: bash
         run: |
           cd "$PROJECT_DIR"
+
           dart analyze lib || true
 
-      - name: Build APK
+      # ============================================
+      # 15. Clean
+      # ============================================
+      - name: Flutter clean
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          echo "===== BUILDING APK ====="
+          flutter clean
+
+          flutter pub get
+
+      # ============================================
+      # 16. Build APK
+      # ============================================
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          echo "======================================"
+          echo "BUILDING DR SHAHAD APK"
+          echo "======================================"
 
           flutter build apk --release
 
+      # ============================================
+      # 17. Find APK
+      # ============================================
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK="$(find "$PROJECT_DIR/build/app/outputs" \
+          APK_FILE="$(find "$PROJECT_DIR/build/app/outputs" \
             -type f \
-            -name '*.apk' \
-            -print -quit)"
+            -name "*.apk" \
+            -print \
+            -quit)"
 
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not created."
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK was not generated."
+
+            find "$PROJECT_DIR/build" \
+              -type f \
+              -print || true
+
             exit 1
           fi
 
+          echo "APK successfully generated:"
+          ls -lh "$APK_FILE"
+
           mkdir -p "$GITHUB_WORKSPACE/apk"
 
-          cp "$APK" \
+          cp "$APK_FILE" \
             "$GITHUB_WORKSPACE/apk/Dr-Shahad-release.apk"
 
-          echo "APK CREATED:"
-          ls -lh "$GITHUB_WORKSPACE/apk/Dr-Shahad-release.apk"
-
+      # ============================================
+      # 18. Upload APK
+      # ============================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
