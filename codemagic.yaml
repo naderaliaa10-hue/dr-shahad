@@ -1,8 +1,8 @@
 workflows:
   dr-shahad-android:
-    name: Dr Shahad - Android APK
+    name: Dr Shahad Android APK
     max_build_duration: 120
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
 
     environment:
       flutter: stable
@@ -11,17 +11,14 @@ workflows:
 
       - name: Extract and prepare project
         script: |
-          #!/usr/bin/env bash
           set -euo pipefail
 
-          echo "========================================"
-          echo " DR SHAHAD - PREPARE PROJECT"
-          echo "========================================"
+          echo "=== DR SHAHAD: PREPARE PROJECT ==="
 
           rm -rf extracted
           mkdir -p extracted
 
-          ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 2 -type f -name '*.zip' -print -quit)"
+          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: Project ZIP not found."
@@ -46,10 +43,6 @@ workflows:
           cd "$PROJECT_DIR"
 
           cp pubspec.yaml pubspec.yaml.codemagic-backup
-
-          echo "========================================"
-          echo " UPDATING DEPENDENCIES"
-          echo "========================================"
 
           python3 - <<'PY'
           from pathlib import Path
@@ -78,108 +71,165 @@ workflows:
 
               if count == 0:
                   raise SystemExit(
-                      f"ERROR: dependency '{name}' not found in pubspec.yaml"
+                      f"ERROR: dependency {name} not found in pubspec.yaml"
                   )
 
           p.write_text(s)
 
-          print("Dependencies updated successfully.")
+          print("Compatible dependency versions written.")
           PY
 
-          echo "========================================"
-          echo " REMOVING OLD ANDROID PROJECT"
-          echo "========================================"
+          echo "=== REMOVING OLD ANDROID PROJECT ==="
 
           rm -rf android
 
-          echo "========================================"
-          echo " GENERATING MODERN ANDROID PROJECT"
-          echo "========================================"
+          echo "=== GENERATING MODERN ANDROID PROJECT ==="
 
           flutter create \
             --platforms=android \
             --project-name=dr_shahad \
             .
 
-          echo "========================================"
-          echo " VERIFYING ANDROID PROJECT"
-          echo "========================================"
+          echo "=== VERIFYING MODERN ANDROID PROJECT ==="
 
-          test -f android/settings.gradle.kts
-          test -f android/app/build.gradle.kts
-          test -f android/build.gradle.kts
-          test -f android/gradle/wrapper/gradle-wrapper.properties
+          if [ ! -f android/settings.gradle.kts ]; then
+            echo "ERROR: android/settings.gradle.kts not found."
+            exit 1
+          fi
 
-          echo "Modern Android project verified successfully."
+          if [ ! -f android/app/build.gradle.kts ]; then
+            echo "ERROR: android/app/build.gradle.kts not found."
+            exit 1
+          fi
 
-          echo "========================================"
-          echo " PREPARATION COMPLETE"
-          echo "========================================"
+          if [ ! -f android/build.gradle.kts ]; then
+            echo "ERROR: android/build.gradle.kts not found."
+            exit 1
+          fi
+
+          echo "=== MODERN ANDROID PROJECT VERIFIED ==="
 
 
-      - name: Configure Android SDK
+      - name: Configure Android API 36
         script: |
-          #!/usr/bin/env bash
           set -euo pipefail
 
-          PROJECT_DIR="$(find "$CM_BUILD_DIR/extracted" -type f -name 'pubspec.yaml' -print -quit | xargs dirname)"
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
 
           cd "$PROJECT_DIR"
 
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          echo "=== CONFIGURING ANDROID API 36 ==="
 
-          echo "Android SDK configured."
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+
+          s = re.sub(
+              r"compileSdk\s*=\s*flutter\.compileSdkVersion",
+              "compileSdk = 36",
+              s
+          )
+
+          s = re.sub(
+              r"minSdk\s*=\s*flutter\.minSdkVersion",
+              "minSdk = 23",
+              s
+          )
+
+          s = re.sub(
+              r"targetSdk\s*=\s*flutter\.targetSdkVersion",
+              "targetSdk = 36",
+              s
+          )
+
+          p.write_text(s)
+
+          print(
+              "Android configured: "
+              "compileSdk=36, targetSdk=36, minSdk=23"
+          )
+          PY
+
+          grep -nE \
+            "compileSdk|minSdk|targetSdk|sourceCompatibility|targetCompatibility|jvmTarget" \
+            android/app/build.gradle.kts || true
 
 
-      - name: Get Flutter packages
+      - name: Resolve dependencies
         script: |
-          #!/usr/bin/env bash
           set -euo pipefail
 
-          PROJECT_DIR="$(find "$CM_BUILD_DIR/extracted" -type f -name 'pubspec.yaml' -print -quit | xargs dirname)"
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
 
           cd "$PROJECT_DIR"
 
+          echo "=== FLUTTER VERSION ==="
+          flutter --version
+
+          echo "=== CLEAN ==="
           flutter clean
+
+          rm -f pubspec.lock
+
+          echo "=== PUB GET ==="
           flutter pub get
 
+          echo "=== DEPENDENCY TREE ==="
+          flutter pub deps --style=compact
 
-      - name: Flutter analyze
+
+      - name: Compatibility checks
         script: |
-          #!/usr/bin/env bash
           set -euo pipefail
 
-          PROJECT_DIR="$(find "$CM_BUILD_DIR/extracted" -type f -name 'pubspec.yaml' -print -quit | xargs dirname)"
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
 
           cd "$PROJECT_DIR"
+
+          echo "=== FLUTTER ANALYZE SUGGESTIONS ==="
+
+          flutter analyze --suggestions
+
+          echo "=== DART ANALYSIS ==="
 
           flutter analyze --no-fatal-infos
 
 
       - name: Build release APK
         script: |
-          #!/usr/bin/env bash
           set -euo pipefail
 
-          PROJECT_DIR="$(find "$CM_BUILD_DIR/extracted" -type f -name 'pubspec.yaml' -print -quit | xargs dirname)"
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
 
           cd "$PROJECT_DIR"
 
-          echo "========================================"
-          echo " BUILDING DR SHAHAD APK"
-          echo "========================================"
+          echo "=== BUILD RELEASE APK ==="
 
-          flutter build apk \
-            --release \
-            --no-tree-shake-icons
+          flutter build apk --release
 
-          echo "========================================"
-          echo " APK BUILD SUCCESSFUL"
-          echo "========================================"
+          APK="$(
+            find build/app/outputs/flutter-apk \
+              -type f \
+              -name '*.apk' \
+              -print \
+              -quit
+          )"
 
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "=== BUILD SUCCESSFUL ==="
+          echo "APK=$APK"
 
 
     artifacts:
-      - extracted/**/build/app/outputs/flutter-apk/app-release.apk
-      - extracted/**/build/app/outputs/**/*.aab
+      - "**/build/app/outputs/flutter-apk/*.apk"
