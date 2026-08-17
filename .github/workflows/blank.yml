@@ -32,10 +32,10 @@ jobs:
           flutter-version: '3.24.5'
           channel: stable
 
-      - name: Create modern Flutter Android project
+      - name: Prepare modern Flutter project
         run: |
           rm -rf dr_shahad
-          mkdir dr_shahad
+          mkdir -p dr_shahad
 
           cp -R "$PROJECT"/. dr_shahad/
 
@@ -43,17 +43,22 @@ jobs:
 
           sed -i 's/^name:.*/name: dr_shahad/' pubspec.yaml
 
-          echo "Project name:"
-          grep '^name:' pubspec.yaml
+          echo "Removing old Android project..."
+          rm -rf android
 
+          echo "Creating fresh modern Android project..."
           flutter create --platforms=android .
+
+          echo "Checking Android project..."
+          test -f android/app/src/main/AndroidManifest.xml
+          test -f android/app/build.gradle
 
       - name: Get dependencies
         working-directory: dr_shahad
         run: |
           flutter pub get
 
-      - name: Build APK
+      - name: Build release APK
         working-directory: dr_shahad
         run: |
           flutter build apk --release
