@@ -17,114 +17,66 @@ jobs:
 
     steps:
 
-      # ==================================================
-      # 1. Checkout repository
-      # ==================================================
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # ==================================================
-      # 2. Find ZIP
-      # ==================================================
-      - name: Find project ZIP
+      - name: Find ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Searching for project ZIP..."
-
-          ZIP_FILE="$(
-            find "$GITHUB_WORKSPACE" \
-              -maxdepth 1 \
-              -type f \
-              -iname "*.zip" \
-              -print \
-              -quit
-          )"
+          ZIP_FILE="$(find "$GITHUB_WORKSPACE" \
+            -maxdepth 1 \
+            -type f \
+            -iname "*.zip" \
+            -print \
+            -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            echo
-            echo "Files in repository:"
-            find "$GITHUB_WORKSPACE" \
-              -maxdepth 1 \
-              -type f \
-              -print
+            echo "ERROR: ZIP file not found."
+            find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -print
             exit 1
           fi
 
-          echo "ZIP found:"
-          echo "$ZIP_FILE"
-
+          echo "Found: $ZIP_FILE"
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
-      # ==================================================
-      # 3. Extract ZIP
-      # ==================================================
-      - name: Extract project
+      - name: Extract ZIP
         shell: bash
         run: |
           set -euo pipefail
 
           rm -rf "$GITHUB_WORKSPACE/extracted"
-
           mkdir -p "$GITHUB_WORKSPACE/extracted"
-
-          echo "Extracting ZIP..."
 
           unzip -q "$ZIP_FILE" \
             -d "$GITHUB_WORKSPACE/extracted"
 
-          echo
-          echo "Extraction completed."
-
-          echo
-          echo "Extracted files:"
-          find "$GITHUB_WORKSPACE/extracted" \
-            -maxdepth 4 \
-            -type f \
-            -print | sort | head -300
-
-      # ==================================================
-      # 4. Find Flutter project
-      # ==================================================
       - name: Find Flutter project
         shell: bash
         run: |
           set -euo pipefail
 
-          PUBSPEC="$(
-            find "$GITHUB_WORKSPACE/extracted" \
-              -type f \
-              -name "pubspec.yaml" \
-              -not -path "*/.dart_tool/*" \
-              -print \
-              -quit
-          )"
+          PUBSPEC="$(find "$GITHUB_WORKSPACE/extracted" \
+            -type f \
+            -name "pubspec.yaml" \
+            -print \
+            -quit)"
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml was not found."
-
-            echo
-            echo "Searching:"
+            echo "ERROR: pubspec.yaml not found."
             find "$GITHUB_WORKSPACE/extracted" \
-              -type f \
-              -name "pubspec.yaml" \
-              -print
-
+              -name "pubspec.yaml" -print
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$PUBSPEC")"
 
-          echo "Flutter project found:"
+          echo "Flutter project:"
           echo "$PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      # ==================================================
-      # 5. Validate project
-      # ==================================================
       - name: Validate project
         shell: bash
         run: |
@@ -132,40 +84,12 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          echo "Project:"
-          pwd
+          test -f pubspec.yaml
+          test -f lib/main.dart
+          test -d android
 
-          echo
-          echo "Files:"
-          ls -la
+          echo "Flutter project is valid."
 
-          if [ ! -f "pubspec.yaml" ]; then
-            echo "ERROR: pubspec.yaml missing."
-            exit 1
-          fi
-
-          if [ ! -f "lib/main.dart" ]; then
-            echo "ERROR: lib/main.dart missing."
-            exit 1
-          fi
-
-          if [ ! -d "android" ]; then
-            echo "ERROR: android directory missing."
-            exit 1
-          fi
-
-          if [ ! -f "android/settings.gradle" ] && \
-             [ ! -f "android/settings.gradle.kts" ]; then
-            echo "ERROR: Android settings file missing."
-            exit 1
-          fi
-
-          echo
-          echo "Project validation successful."
-
-      # ==================================================
-      # 6. Setup Java
-      # ==================================================
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -173,187 +97,97 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      # ==================================================
-      # 7. Setup Flutter
-      # ==================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      # ==================================================
-      # 8. Versions
-      # ==================================================
-      - name: Show versions
-        shell: bash
-        run: |
-          flutter --version
-          dart --version
-          java -version
-
-      # ==================================================
-      # 9. Fix Android Gradle Plugin
-      # ==================================================
-      - name: Update Android Gradle Plugin
+      - name: Fix Android Gradle Plugin
         shell: bash
         run: |
           set -euo pipefail
 
           SETTINGS="$PROJECT_DIR/android/settings.gradle"
-          SETTINGS_KTS="$PROJECT_DIR/android/settings.gradle.kts"
-          BUILD_GRADLE="$PROJECT_DIR/android/build.gradle"
-          BUILD_GRADLE_KTS="$PROJECT_DIR/android/build.gradle.kts"
+          BUILD="$PROJECT_DIR/android/build.gradle"
 
-          echo "Updating Android Gradle Plugin..."
+          echo "Updating Android Gradle Plugin to 8.11.1"
 
-          # ----------------------------------------------
-          # settings.gradle
-          # ----------------------------------------------
           if [ -f "$SETTINGS" ]; then
-
             sed -i -E \
-              "s/(id[[:space:]]*['\"]com\.android\.application['\"][[:space:]]*version[[:space:]]*['\"])[^'\"]+(['\"])/\18.11.1\2/g" \
+              "s/(com\.android\.application['\"][[:space:]]+version[[:space:]]+['\"])[^'\"]+/\18.11.1/g" \
               "$SETTINGS"
 
             sed -i -E \
-              "s/(id[[:space:]]*['\"]com\.android\.library['\"][[:space:]]*version[[:space:]]*['\"])[^'\"]+(['\"])/\18.11.1\2/g" \
+              "s/(com\.android\.library['\"][[:space:]]+version[[:space:]]+['\"])[^'\"]+/\18.11.1/g" \
               "$SETTINGS"
-
           fi
 
-          # ----------------------------------------------
-          # settings.gradle.kts
-          # ----------------------------------------------
-          if [ -f "$SETTINGS_KTS" ]; then
-
-            sed -i -E \
-              "s/(id\(\"com\.android\.application\"\)[[:space:]]*version[[:space:]]*\\\")([^\\\"]+)(\\\")/\18.11.1\3/g" \
-              "$SETTINGS_KTS"
-
-            sed -i -E \
-              "s/(id\(\"com\.android\.library\"\)[[:space:]]*version[[:space:]]*\\\")([^\\\"]+)(\\\")/\18.11.1\3/g" \
-              "$SETTINGS_KTS"
-
-          fi
-
-          # ----------------------------------------------
-          # build.gradle
-          # ----------------------------------------------
-          if [ -f "$BUILD_GRADLE" ]; then
-
+          if [ -f "$BUILD" ]; then
             sed -i -E \
               "s/com\.android\.tools\.build:gradle:[0-9.]+/com.android.tools.build:gradle:8.11.1/g" \
-              "$BUILD_GRADLE"
-
+              "$BUILD"
           fi
 
-          # ----------------------------------------------
-          # build.gradle.kts
-          # ----------------------------------------------
-          if [ -f "$BUILD_GRADLE_KTS" ]; then
+          echo "AGP configuration:"
+          grep -R "com.android.application" "$PROJECT_DIR/android" || true
+          grep -R "com.android.tools.build:gradle" "$PROJECT_DIR/android" || true
 
-            sed -i -E \
-              "s/com\.android\.tools\.build:gradle:[0-9.]+/com.android.tools.build:gradle:8.11.1/g" \
-              "$BUILD_GRADLE_KTS"
-
-          fi
-
-          echo
-          echo "Android configuration after update:"
-
-          if [ -f "$SETTINGS" ]; then
-            echo "----- settings.gradle -----"
-            cat "$SETTINGS"
-          fi
-
-          if [ -f "$SETTINGS_KTS" ]; then
-            echo "----- settings.gradle.kts -----"
-            cat "$SETTINGS_KTS"
-          fi
-
-      # ==================================================
-      # 10. Check Android Gradle wrapper
-      # ==================================================
-      - name: Update Gradle wrapper
+      - name: Force Gradle 8.13
         shell: bash
         run: |
           set -euo pipefail
 
-          GRADLE_PROPERTIES="$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
+          WRAPPER="$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
 
-          if [ ! -f "$GRADLE_PROPERTIES" ]; then
-            echo "ERROR: Gradle wrapper properties not found."
+          if [ ! -f "$WRAPPER" ]; then
+            echo "ERROR: gradle-wrapper.properties not found."
             exit 1
           fi
 
-          echo "Updating Gradle wrapper..."
+          echo "Forcing Gradle 8.13"
 
           sed -i -E \
-            's#distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip#g' \
-            "$GRADLE_PROPERTIES"
+            's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip#' \
+            "$WRAPPER"
 
           echo
-          cat "$GRADLE_PROPERTIES"
+          echo "Final Gradle wrapper:"
+          cat "$WRAPPER"
 
-      # ==================================================
-      # 11. Flutter clean
-      # ==================================================
+      - name: Verify Gradle version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR/android"
+
+          chmod +x gradlew
+
+          ./gradlew --version
+
       - name: Flutter clean
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter clean
 
-      # ==================================================
-      # 12. Get dependencies
-      # ==================================================
       - name: Flutter pub get
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
           flutter pub get
 
-      # ==================================================
-      # 13. Analyze Dart
-      # Warnings will NOT stop the build
-      # ==================================================
-      - name: Analyze Dart code
+      - name: Analyze Dart
         shell: bash
         run: |
           cd "$PROJECT_DIR"
 
-          echo "Running Dart analyzer..."
+          dart analyze lib || true
 
-          dart analyze lib || {
-            STATUS=$?
-
-            echo
-            echo "Analyzer returned status: $STATUS"
-            echo "Analyzer output is shown above."
-            echo "Continuing to Android build..."
-          }
-
-      # ==================================================
-      # 14. Flutter compatibility check
-      # ==================================================
-      - name: Flutter Android compatibility check
-        shell: bash
-        run: |
-          cd "$PROJECT_DIR"
-
-          flutter analyze --suggestions || true
-
-      # ==================================================
-      # 15. Build APK
-      # ==================================================
-      - name: Build release APK
+      - name: Build APK
         shell: bash
         run: |
           set -euo pipefail
@@ -361,52 +195,38 @@ jobs:
           cd "$PROJECT_DIR"
 
           echo "========================================"
-          echo "Building Dr Shahad release APK"
+          echo "BUILDING DR SHAHAD APK"
           echo "========================================"
 
           flutter build apk --release
 
-      # ==================================================
-      # 16. Verify APK
-      # ==================================================
-      - name: Verify APK
+      - name: Find APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK_FILE="$(
-            find "$PROJECT_DIR/build/app/outputs" \
-              -type f \
-              -name "*.apk" \
-              -print \
-              -quit
-          )"
+          APK="$(find "$PROJECT_DIR/build/app/outputs" \
+            -type f \
+            -name "*.apk" \
+            -print \
+            -quit)"
 
-          if [ -z "$APK_FILE" ]; then
+          if [ -z "$APK" ]; then
             echo "ERROR: APK was not generated."
-
-            echo
-            echo "Build directory:"
             find "$PROJECT_DIR/build" \
-              -maxdepth 6 \
               -type f \
               -print || true
-
             exit 1
           fi
 
-          echo
-          echo "APK successfully created:"
-          ls -lh "$APK_FILE"
+          echo "APK:"
+          ls -lh "$APK"
 
           mkdir -p "$GITHUB_WORKSPACE/apk"
 
-          cp "$APK_FILE" \
+          cp "$APK" \
             "$GITHUB_WORKSPACE/apk/Dr-Shahad-release.apk"
 
-      # ==================================================
-      # 17. Upload APK
-      # ==================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
