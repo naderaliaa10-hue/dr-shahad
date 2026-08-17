@@ -12,11 +12,9 @@ permissions:
 
 jobs:
   build:
-    name: Build Dr Shahad APK
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -25,21 +23,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          ZIP_FILE="$(find "$GITHUB_WORKSPACE" \
-            -maxdepth 1 \
-            -type f \
-            -iname "*.zip" \
-            -print \
-            -quit)"
+          ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -iname '*.zip' -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found."
-            find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -print
+            echo "ERROR: No ZIP file found."
             exit 1
           fi
 
-          echo "Found: $ZIP_FILE"
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+          echo "Using: $ZIP_FILE"
 
       - name: Extract ZIP
         shell: bash
@@ -49,8 +41,7 @@ jobs:
           rm -rf "$GITHUB_WORKSPACE/extracted"
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
-          unzip -q "$ZIP_FILE" \
-            -d "$GITHUB_WORKSPACE/extracted"
+          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
 
       - name: Find Flutter project
         shell: bash
@@ -59,43 +50,37 @@ jobs:
 
           PUBSPEC="$(find "$GITHUB_WORKSPACE/extracted" \
             -type f \
-            -name "pubspec.yaml" \
-            -print \
-            -quit)"
+            -name pubspec.yaml \
+            -print -quit)"
 
           if [ -z "$PUBSPEC" ]; then
             echo "ERROR: pubspec.yaml not found."
-            find "$GITHUB_WORKSPACE/extracted" \
-              -name "pubspec.yaml" -print
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$PUBSPEC")"
 
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
           echo "Flutter project:"
           echo "$PROJECT_DIR"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Validate project
         shell: bash
         run: |
           set -euo pipefail
 
-          cd "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/pubspec.yaml"
+          test -f "$PROJECT_DIR/lib/main.dart"
+          test -d "$PROJECT_DIR/android"
 
-          test -f pubspec.yaml
-          test -f lib/main.dart
-          test -d android
-
-          echo "Flutter project is valid."
+          echo "Project validation OK."
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -103,59 +88,103 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Fix Android Gradle Plugin
+      - name: Fix Android Gradle files
         shell: bash
         run: |
           set -euo pipefail
 
-          SETTINGS="$PROJECT_DIR/android/settings.gradle"
-          BUILD="$PROJECT_DIR/android/build.gradle"
+          python3 - "$PROJECT_DIR" <<'PY'
+          import sys
+          from pathlib import Path
+          import re
 
-          echo "Updating Android Gradle Plugin to 8.11.1"
+          project = Path(sys.argv[1])
+          android = project / "android"
 
-          if [ -f "$SETTINGS" ]; then
-            sed -i -E \
-              "s/(com\.android\.application['\"][[:space:]]+version[[:space:]]+['\"])[^'\"]+/\18.11.1/g" \
-              "$SETTINGS"
+          settings = android / "settings.gradle"
+          settings_kts = android / "settings.gradle.kts"
 
-            sed -i -E \
-              "s/(com\.android\.library['\"][[:space:]]+version[[:space:]]+['\"])[^'\"]+/\18.11.1/g" \
-              "$SETTINGS"
-          fi
+          wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
 
-          if [ -f "$BUILD" ]; then
-            sed -i -E \
-              "s/com\.android\.tools\.build:gradle:[0-9.]+/com.android.tools.build:gradle:8.11.1/g" \
-              "$BUILD"
-          fi
+          # -----------------------------------------
+          # AGP 8.11.1
+          # -----------------------------------------
 
-          echo "AGP configuration:"
-          grep -R "com.android.application" "$PROJECT_DIR/android" || true
-          grep -R "com.android.tools.build:gradle" "$PROJECT_DIR/android" || true
+          if settings.exists():
+              text = settings.read_text()
 
-      - name: Force Gradle 8.13
-        shell: bash
-        run: |
-          set -euo pipefail
+              text = re.sub(
+                  r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])[^"\']+(["\'])',
+                  r'\g<1>8.11.1\2',
+                  text
+              )
 
-          WRAPPER="$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
+              text = re.sub(
+                  r'(id\s+["\']com\.android\.library["\']\s+version\s+["\'])[^"\']+(["\'])',
+                  r'\g<1>8.11.1\2',
+                  text
+              )
 
-          if [ ! -f "$WRAPPER" ]; then
-            echo "ERROR: gradle-wrapper.properties not found."
-            exit 1
-          fi
+              settings.write_text(text)
 
-          echo "Forcing Gradle 8.13"
+          if settings_kts.exists():
+              text = settings_kts.read_text()
 
-          sed -i -E \
-            's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip#' \
-            "$WRAPPER"
+              text = re.sub(
+                  r'(id\("com\.android\.application"\)\s*version\s*")[^"]+(")',
+                  r'\g<1>8.11.1\2',
+                  text
+              )
 
-          echo
-          echo "Final Gradle wrapper:"
-          cat "$WRAPPER"
+              text = re.sub(
+                  r'(id\("com\.android\.library"\)\s*version\s*")[^"]+(")',
+                  r'\g<1>8.11.1\2',
+                  text
+              )
 
-      - name: Verify Gradle version
+              settings_kts.write_text(text)
+
+          # -----------------------------------------
+          # Gradle 8.14
+          # -----------------------------------------
+
+          wrapper.parent.mkdir(parents=True, exist_ok=True)
+
+          lines = []
+
+          if wrapper.exists():
+              lines = wrapper.read_text().splitlines()
+
+          found = False
+
+          for i, line in enumerate(lines):
+              if line.startswith("distributionUrl="):
+                  lines[i] = (
+                      "distributionUrl="
+                      "https\\://services.gradle.org/distributions/"
+                      "gradle-8.14-bin.zip"
+                  )
+                  found = True
+
+          if not found:
+              lines.append(
+                  "distributionUrl="
+                  "https\\://services.gradle.org/distributions/"
+                  "gradle-8.14-bin.zip"
+              )
+
+          wrapper.write_text("\n".join(lines) + "\n")
+
+          print("\n===== FINAL settings.gradle =====")
+
+          if settings.exists():
+              print(settings.read_text())
+
+          print("\n===== FINAL gradle-wrapper.properties =====")
+          print(wrapper.read_text())
+          PY
+
+      - name: Verify Gradle wrapper
         shell: bash
         run: |
           set -euo pipefail
@@ -164,6 +193,11 @@ jobs:
 
           chmod +x gradlew
 
+          echo "===== Gradle wrapper URL ====="
+          grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties
+
+          echo
+          echo "===== Gradle version actually used ====="
           ./gradlew --version
 
       - name: Flutter clean
@@ -180,11 +214,10 @@ jobs:
           cd "$PROJECT_DIR"
           flutter pub get
 
-      - name: Analyze Dart
+      - name: Dart analysis
         shell: bash
         run: |
           cd "$PROJECT_DIR"
-
           dart analyze lib || true
 
       - name: Build APK
@@ -194,38 +227,32 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          echo "========================================"
-          echo "BUILDING DR SHAHAD APK"
-          echo "========================================"
+          echo "===== BUILDING APK ====="
 
           flutter build apk --release
 
-      - name: Find APK
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
 
           APK="$(find "$PROJECT_DIR/build/app/outputs" \
             -type f \
-            -name "*.apk" \
-            -print \
-            -quit)"
+            -name '*.apk' \
+            -print -quit)"
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            find "$PROJECT_DIR/build" \
-              -type f \
-              -print || true
+            echo "ERROR: APK was not created."
             exit 1
           fi
-
-          echo "APK:"
-          ls -lh "$APK"
 
           mkdir -p "$GITHUB_WORKSPACE/apk"
 
           cp "$APK" \
             "$GITHUB_WORKSPACE/apk/Dr-Shahad-release.apk"
+
+          echo "APK CREATED:"
+          ls -lh "$GITHUB_WORKSPACE/apk/Dr-Shahad-release.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
