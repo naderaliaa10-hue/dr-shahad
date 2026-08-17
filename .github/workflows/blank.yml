@@ -23,7 +23,6 @@ jobs:
             exit 1
           fi
 
-          echo "Original project: $PROJECT"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Setup Flutter
@@ -32,33 +31,51 @@ jobs:
           flutter-version: '3.24.5'
           channel: stable
 
-      - name: Prepare modern Flutter project
+      - name: Prepare modern Android project
         run: |
           rm -rf dr_shahad
-          mkdir -p dr_shahad
-
+          mkdir dr_shahad
           cp -R "$PROJECT"/. dr_shahad/
 
           cd dr_shahad
 
           sed -i 's/^name:.*/name: dr_shahad/' pubspec.yaml
 
-          echo "Removing old Android project..."
           rm -rf android
 
-          echo "Creating fresh modern Android project..."
           flutter create --platforms=android .
 
-          echo "Checking Android project..."
-          test -f android/app/src/main/AndroidManifest.xml
-          test -f android/app/build.gradle
+      - name: Fix record dependency
+        working-directory: dr_shahad
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("pubspec.yaml")
+          s = p.read_text()
+
+          lines = s.splitlines()
+          out = []
+
+          for line in lines:
+              if line.strip().startswith("record:"):
+                  out.append("  record: ^6.1.0")
+              else:
+                  out.append(line)
+
+          p.write_text("\n".join(out) + "\n")
+          PY
+
+          echo "Updated record dependency:"
+          grep -n "record:" pubspec.yaml || true
 
       - name: Get dependencies
         working-directory: dr_shahad
         run: |
+          flutter clean
           flutter pub get
 
-      - name: Build release APK
+      - name: Build APK
         working-directory: dr_shahad
         run: |
           flutter build apk --release
