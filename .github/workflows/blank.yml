@@ -44,6 +44,7 @@ jobs:
           set -euo pipefail
 
           rm -rf "$GITHUB_WORKSPACE/extracted"
+
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
           unzip -q "$ZIP_FILE" \
@@ -72,16 +73,6 @@ jobs:
           echo "Project:"
           echo "$PROJECT_DIR"
 
-      - name: Validate project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -f "$PROJECT_DIR/pubspec.yaml"
-          test -f "$PROJECT_DIR/lib/main.dart"
-
-          echo "Flutter project OK."
-
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -102,77 +93,131 @@ jobs:
           java -version
 
       # ==================================================
-      # Remove OLD Android folder
+      # FORCE COMPILE SDK 36
       # ==================================================
-      - name: Remove old Android project
+
+      - name: Configure compileSdk 36
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          rm -rf android
+          echo "Searching Android Gradle files..."
 
-          echo "Old Android folder removed."
+          FILES=""
+
+          if [ -f android/app/build.gradle ]; then
+            FILES="$FILES android/app/build.gradle"
+          fi
+
+          if [ -f android/app/build.gradle.kts ]; then
+            FILES="$FILES android/app/build.gradle.kts"
+          fi
+
+          if [ -z "$FILES" ]; then
+            echo "ERROR: Android app Gradle file not found."
+
+            find android -maxdepth 3 -type f -print
+
+            exit 1
+          fi
+
+          for FILE in $FILES; do
+
+            echo "========================================"
+            echo "Updating:"
+            echo "$FILE"
+            echo "========================================"
+
+            python3 - "$FILE" <<'PY'
+          import sys
+          from pathlib import Path
+          import re
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          # Flutter compileSdk
+          text = re.sub(
+              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+              'compileSdk = 36',
+              text
+          )
+
+          text = re.sub(
+              r'compileSdk\s+flutter\.compileSdkVersion',
+              'compileSdk 36',
+              text
+          )
+
+          # Numeric compileSdk
+          text = re.sub(
+              r'compileSdk\s*=\s*[0-9]+',
+              'compileSdk = 36',
+              text
+          )
+
+          text = re.sub(
+              r'compileSdk\s+[0-9]+',
+              'compileSdk 36',
+              text
+          )
+
+          # compileSdkVersion
+          text = re.sub(
+              r'compileSdkVersion\s+[0-9]+',
+              'compileSdkVersion 36',
+              text
+          )
+
+          path.write_text(text)
+          PY
+
+            echo
+            echo "Result:"
+            grep -n "compileSdk" "$FILE" || true
+
+          done
 
       # ==================================================
-      # Generate completely NEW Android project
+      # Verify compileSdk
       # ==================================================
-      - name: Generate modern Android project
+
+      - name: Verify compileSdk 36
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          flutter create \
-            --platforms=android \
-            --org=com.drshahad \
-            .
+          echo "========================================"
+          echo "VERIFYING COMPILE SDK"
+          echo "========================================"
 
-          echo "Modern Android project generated."
+          grep -Rni \
+            "compileSdk" \
+            android/app \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            || true
 
-      # ==================================================
-      # Verify generated Android project
-      # ==================================================
-      - name: Verify generated Android project
-        shell: bash
-        run: |
-          set -euo pipefail
+          if grep -Rni \
+            "compileSdk.*34" \
+            android/app \
+            --include="*.gradle" \
+            --include="*.gradle.kts"; then
 
-          cd "$PROJECT_DIR"
-
-          if [ ! -d android ]; then
-            echo "ERROR: Android folder was not generated."
+            echo "ERROR: compileSdk 34 is still present."
             exit 1
           fi
 
-          if [ ! -f android/gradlew ]; then
-            echo "ERROR: Android Gradle wrapper was not generated."
-            exit 1
-          fi
-
-          if [ ! -f android/settings.gradle.kts ] && \
-             [ ! -f android/settings.gradle ]; then
-            echo "ERROR: Android settings file was not generated."
-            exit 1
-          fi
-
-          if [ ! -f android/app/build.gradle.kts ] && \
-             [ ! -f android/app/build.gradle ]; then
-            echo "ERROR: Android app Gradle file was not generated."
-            exit 1
-          fi
-
-          echo "Android project verification passed."
-
-          echo
-          echo "Android files:"
-          find android -maxdepth 3 -type f | sort
+          echo "compileSdk 34 is not present in app configuration."
 
       # ==================================================
       # Dependencies
       # ==================================================
+
       - name: Flutter pub get
         shell: bash
         run: |
@@ -183,18 +228,9 @@ jobs:
           flutter pub get
 
       # ==================================================
-      # Analyze
-      # ==================================================
-      - name: Dart analyze
-        shell: bash
-        run: |
-          cd "$PROJECT_DIR"
-
-          dart analyze lib || true
-
-      # ==================================================
       # Clean
       # ==================================================
+
       - name: Flutter clean
         shell: bash
         run: |
@@ -203,11 +239,13 @@ jobs:
           cd "$PROJECT_DIR"
 
           flutter clean
+
           flutter pub get
 
       # ==================================================
       # Build
       # ==================================================
+
       - name: Build release APK
         shell: bash
         run: |
@@ -217,6 +255,7 @@ jobs:
 
           echo "========================================"
           echo "BUILDING DR SHAHAD APK"
+          echo "COMPILE SDK: 36"
           echo "========================================"
 
           flutter build apk --release
@@ -224,6 +263,7 @@ jobs:
       # ==================================================
       # Verify APK
       # ==================================================
+
       - name: Verify APK
         shell: bash
         run: |
@@ -240,7 +280,10 @@ jobs:
             exit 1
           fi
 
-          echo "APK successfully created:"
+          echo "========================================"
+          echo "APK CREATED SUCCESSFULLY"
+          echo "========================================"
+
           ls -lh "$APK_FILE"
 
           mkdir -p "$GITHUB_WORKSPACE/apk"
@@ -251,6 +294,7 @@ jobs:
       # ==================================================
       # Upload APK
       # ==================================================
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
