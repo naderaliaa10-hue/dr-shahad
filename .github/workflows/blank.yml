@@ -19,33 +19,40 @@ jobs:
           PROJECT=$(find extracted -name pubspec.yaml -type f | head -1 | xargs dirname)
 
           if [ -z "$PROJECT" ]; then
-            echo "ERROR: pubspec.yaml was not found"
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Setup Flutter
+      - name: Setup latest stable Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.44.7'
           channel: stable
 
-      - name: Prepare modern Android project
+      - name: Create modern Android project
         run: |
           rm -rf dr_shahad
           mkdir dr_shahad
+
           cp -R "$PROJECT"/. dr_shahad/
 
           cd dr_shahad
 
+          # Valid Dart package name
           sed -i 's/^name:.*/name: dr_shahad/' pubspec.yaml
 
+          # Remove every old Android configuration
           rm -rf android
 
-          flutter create --platforms=android .
+          # Create completely new Android v2 project
+          flutter create \
+            --platforms=android \
+            --org com.drshahad \
+            .
 
-      - name: Fix record dependency
+      - name: Update modern dependencies
         working-directory: dr_shahad
         run: |
           python3 - <<'PY'
@@ -54,28 +61,40 @@ jobs:
           p = Path("pubspec.yaml")
           s = p.read_text()
 
-          lines = s.splitlines()
-          out = []
+          # Replace old record dependency if present
+          import re
+          s = re.sub(
+              r'(?m)^\s*record:\s*[^\n]+',
+              '  record: ^7.1.1',
+              s
+          )
 
-          for line in lines:
-              if line.strip().startswith("record:"):
-                  out.append("  record: ^6.1.0")
-              else:
-                  out.append(line)
+          # Add dependency overrides so old record_android
+          # can never be selected.
+          if "dependency_overrides:" in s:
+              s = re.sub(
+                  r'dependency_overrides:.*',
+                  'dependency_overrides:\n  record_android: ^2.1.2',
+                  s,
+                  flags=re.S
+              )
+          else:
+              s += "\n\ndependency_overrides:\n  record_android: ^2.1.2\n"
 
-          p.write_text("\n".join(out) + "\n")
+          p.write_text(s)
           PY
 
-          echo "Updated record dependency:"
-          grep -n "record:" pubspec.yaml || true
-
-      - name: Get dependencies
-        working-directory: dr_shahad
-        run: |
+          rm -f pubspec.lock
           flutter clean
           flutter pub get
 
-      - name: Build APK
+      - name: Verify dependency versions
+        working-directory: dr_shahad
+        run: |
+          echo "Installed record packages:"
+          flutter pub deps | grep -E "record|record_android" || true
+
+      - name: Build modern release APK
         working-directory: dr_shahad
         run: |
           flutter build apk --release
