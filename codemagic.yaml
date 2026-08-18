@@ -92,25 +92,10 @@ workflows:
 
           echo "=== VERIFYING MODERN ANDROID PROJECT ==="
 
-          if [ ! -f android/settings.gradle.kts ]; then
-            echo "ERROR: android/settings.gradle.kts not found."
-            exit 1
-          fi
-
-          if [ ! -f android/app/build.gradle.kts ]; then
-            echo "ERROR: android/app/build.gradle.kts not found."
-            exit 1
-          fi
-
-          if [ ! -f android/build.gradle.kts ]; then
-            echo "ERROR: android/build.gradle.kts not found."
-            exit 1
-          fi
-
-          if [ ! -f android/gradle/wrapper/gradle-wrapper.properties ]; then
-            echo "ERROR: Gradle wrapper not found."
-            exit 1
-          fi
+          test -f android/settings.gradle.kts
+          test -f android/app/build.gradle.kts
+          test -f android/build.gradle.kts
+          test -f android/gradle/wrapper/gradle-wrapper.properties
 
           echo "=== MODERN ANDROID PROJECT VERIFIED ==="
 
@@ -245,6 +230,276 @@ workflows:
           PY
 
 
+      - name: Add Dr Shahad robot eyes
+        script: |
+          set -euo pipefail
+
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          cd "$PROJECT_DIR"
+
+          echo "=== CREATING DR SHAHAD ROBOT EYES ==="
+
+          mkdir -p lib/widgets
+
+          cat > lib/widgets/robot_eyes.dart <<'DART'
+          import 'dart:math' as math;
+          import 'package:flutter/material.dart';
+
+          class RobotEyes extends StatefulWidget {
+            const RobotEyes({
+              super.key,
+              this.size = 100,
+            });
+
+            final double size;
+
+            @override
+            State<RobotEyes> createState() => _RobotEyesState();
+          }
+
+          class _RobotEyesState extends State<RobotEyes>
+              with TickerProviderStateMixin {
+            late final AnimationController _blink;
+            late final AnimationController _look;
+            late final AnimationController _glow;
+
+            @override
+            void initState() {
+              super.initState();
+
+              _blink = AnimationController(
+                vsync: this,
+                duration: const Duration(milliseconds: 180),
+              );
+
+              _look = AnimationController(
+                vsync: this,
+                duration: const Duration(seconds: 3),
+              )..repeat(reverse: true);
+
+              _glow = AnimationController(
+                vsync: this,
+                duration: const Duration(milliseconds: 1300),
+              )..repeat(reverse: true);
+
+              _blinkLoop();
+            }
+
+            Future<void> _blinkLoop() async {
+              while (mounted) {
+                await Future.delayed(
+                  const Duration(milliseconds: 3200),
+                );
+
+                if (!mounted) return;
+
+                await _blink.forward();
+                await _blink.reverse();
+              }
+            }
+
+            @override
+            void dispose() {
+              _blink.dispose();
+              _look.dispose();
+              _glow.dispose();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return AnimatedBuilder(
+                animation: Listenable.merge([
+                  _blink,
+                  _look,
+                  _glow,
+                ]),
+                builder: (context, child) {
+                  final blink =
+                      Curves.easeInOut.transform(_blink.value);
+
+                  final look =
+                      math.sin(_look.value * math.pi) *
+                      widget.size *
+                      0.045;
+
+                  final glow =
+                      20.0 + (_glow.value * 15.0);
+
+                  return SizedBox(
+                    width: widget.size * 1.8,
+                    height: widget.size,
+                    child: Row(
+                      mainAxisAlignment:
+                          MainAxisAlignment.center,
+                      children: [
+                        _eye(
+                          blink: blink,
+                          look: look,
+                          glow: glow,
+                        ),
+                        SizedBox(
+                          width: widget.size * 0.14,
+                        ),
+                        _eye(
+                          blink: blink,
+                          look: look,
+                          glow: glow,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            }
+
+            Widget _eye({
+              required double blink,
+              required double look,
+              required double glow,
+            }) {
+              final width = widget.size * 0.55;
+
+              final height = math.max(
+                widget.size * 0.10,
+                widget.size * 0.72 * (1 - blink * 0.90),
+              );
+
+              return Container(
+                width: width,
+                height: height,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(
+                    widget.size,
+                  ),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFEFFFFF),
+                      Color(0xFF8CF3FF),
+                      Color(0xFF38BDF8),
+                      Color(0xFF6366F1),
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF67E8F9)
+                          .withOpacity(0.70),
+                      blurRadius: glow,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: width * 0.24 + look,
+                      top: height * 0.20,
+                      child: Container(
+                        width: width * 0.28,
+                        height: width * 0.28,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: width * 0.18 - look,
+                      bottom: height * 0.17,
+                      child: Container(
+                        width: width * 0.11,
+                        height: width * 0.11,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+          }
+          DART
+
+          echo "Robot eyes widget created."
+
+
+      - name: Add robot eyes to application
+        script: |
+          set -euo pipefail
+
+          PUBSPEC="$(find extracted -type f -name 'pubspec.yaml' -print -quit)"
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          cd "$PROJECT_DIR"
+
+          echo "=== CONNECTING ROBOT EYES TO APP ==="
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("lib/main.dart")
+
+          if not p.exists():
+              raise SystemExit("ERROR: lib/main.dart not found.")
+
+          s = p.read_text()
+
+          import_line = "import 'widgets/robot_eyes.dart';"
+
+          if import_line not in s:
+              s = import_line + "\n" + s
+
+          marker = "ROBOT_EYES_OVERLAY_ADDED"
+
+          if marker not in s:
+
+              old = "return MaterialApp("
+
+              if old in s:
+
+                  s = s.replace(
+                      old,
+                      """return MaterialApp(
+            builder: (context, child) {
+              return Stack(
+                children: [
+                  child ?? const SizedBox.shrink(),
+                  const Positioned(
+                    top: 42,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(
+                      child: Center(
+                        child: RobotEyes(size: 82),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+            // ROBOT_EYES_OVERLAY_ADDED
+          """,
+                      1,
+                  )
+
+              else:
+                  print(
+                      "MaterialApp constructor was not found. "
+                      "Robot eyes widget was created but not injected."
+                  )
+
+          p.write_text(s)
+
+          print("Robot eyes integration completed.")
+          PY
+
+
       - name: Verify Dart files
         script: |
           set -euo pipefail
@@ -258,9 +513,11 @@ workflows:
 
           test -f pubspec.yaml
           test -f lib/main.dart
+          test -f lib/widgets/robot_eyes.dart
 
           echo "pubspec.yaml: OK"
           echo "lib/main.dart: OK"
+          echo "lib/widgets/robot_eyes.dart: OK"
 
           if [ -d lib ]; then
             echo "=== LIB DIRECTORY ==="
