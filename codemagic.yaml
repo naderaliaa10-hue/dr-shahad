@@ -239,7 +239,7 @@ workflows:
 
           cd "$PROJECT_DIR"
 
-          echo "=== CREATING DR SHAHAD ROBOT EYES ==="
+          echo "=== CREATING EILIK-STYLE DR SHAHAD ROBOT EYES ==="
 
           mkdir -p lib/widgets
 
@@ -276,12 +276,12 @@ workflows:
 
               _look = AnimationController(
                 vsync: this,
-                duration: const Duration(seconds: 3),
+                duration: const Duration(seconds: 4),
               )..repeat(reverse: true);
 
               _glow = AnimationController(
                 vsync: this,
-                duration: const Duration(milliseconds: 1300),
+                duration: const Duration(milliseconds: 1400),
               )..repeat(reverse: true);
 
               _blinkLoop();
@@ -290,12 +290,15 @@ workflows:
             Future<void> _blinkLoop() async {
               while (mounted) {
                 await Future.delayed(
-                  const Duration(milliseconds: 3200),
+                  const Duration(milliseconds: 3000),
                 );
 
                 if (!mounted) return;
 
                 await _blink.forward();
+
+                if (!mounted) return;
+
                 await _blink.reverse();
               }
             }
@@ -323,17 +326,19 @@ workflows:
                   final look =
                       math.sin(_look.value * math.pi) *
                       widget.size *
-                      0.045;
+                      0.055;
 
                   final glow =
-                      20.0 + (_glow.value * 15.0);
+                      12.0 + (_glow.value * 12.0);
 
                   return SizedBox(
-                    width: widget.size * 1.8,
-                    height: widget.size,
+                    width: widget.size * 2.05,
+                    height: widget.size * 0.95,
                     child: Row(
                       mainAxisAlignment:
                           MainAxisAlignment.center,
+                      crossAxisAlignment:
+                          CrossAxisAlignment.center,
                       children: [
                         _eye(
                           blink: blink,
@@ -360,11 +365,15 @@ workflows:
               required double look,
               required double glow,
             }) {
-              final width = widget.size * 0.55;
+              final width = widget.size * 0.72;
+
+              final normalHeight =
+                  widget.size * 0.72;
 
               final height = math.max(
-                widget.size * 0.10,
-                widget.size * 0.72 * (1 - blink * 0.90),
+                widget.size * 0.055,
+                normalHeight *
+                    (1.0 - blink * 0.94),
               );
 
               return Container(
@@ -374,47 +383,56 @@ workflows:
                   borderRadius: BorderRadius.circular(
                     widget.size,
                   ),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  gradient: const RadialGradient(
+                    center: Alignment.center,
+                    radius: 0.82,
                     colors: [
-                      Color(0xFFEFFFFF),
-                      Color(0xFF8CF3FF),
-                      Color(0xFF38BDF8),
-                      Color(0xFF6366F1),
+                      Color(0xFFFFFFFF),
+                      Color(0xFFDDFBFF),
+                      Color(0xFF8DEFFF),
+                      Color(0xFF4DD9FF),
+                    ],
+                    stops: [
+                      0.0,
+                      0.34,
+                      0.72,
+                      1.0,
                     ],
                   ),
                   boxShadow: [
                     BoxShadow(
                       color: const Color(0xFF67E8F9)
-                          .withOpacity(0.70),
+                          .withValues(alpha: 0.55),
                       blurRadius: glow,
-                      spreadRadius: 2,
+                      spreadRadius: 1,
                     ),
                   ],
                 ),
                 child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     Positioned(
-                      left: width * 0.24 + look,
-                      top: height * 0.20,
+                      left: width * 0.30 + look,
+                      top: height * 0.18,
                       child: Container(
-                        width: width * 0.28,
-                        height: width * 0.28,
+                        width: width * 0.26,
+                        height: width * 0.26,
                         decoration: const BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
                         ),
                       ),
                     ),
+
                     Positioned(
-                      right: width * 0.18 - look,
+                      right: width * 0.16 - look,
                       bottom: height * 0.17,
                       child: Container(
-                        width: width * 0.11,
-                        height: width * 0.11,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
+                        width: width * 0.10,
+                        height: width * 0.10,
+                        decoration: BoxDecoration(
+                          color: Colors.white
+                              .withValues(alpha: 0.92),
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -426,7 +444,7 @@ workflows:
           }
           DART
 
-          echo "Robot eyes widget created."
+          echo "EILIK-STYLE ROBOT EYES CREATED."
 
 
       - name: Add robot eyes to application
@@ -452,24 +470,26 @@ workflows:
 
           import_line = "import 'widgets/robot_eyes.dart';"
 
-          if import_line not in s:
-              s = import_line + "\n" + s
-
           marker = "ROBOT_EYES_OVERLAY_ADDED"
+
+          if "return MaterialApp(" not in s:
+              raise SystemExit(
+                  "ERROR: MaterialApp constructor was not found."
+              )
 
           if marker not in s:
 
-              old = "return MaterialApp("
+              if import_line not in s:
+                  s = import_line + "\n" + s
 
-              if old in s:
-
-                  s = s.replace(
-                      old,
-                      """return MaterialApp(
+              s = s.replace(
+                  "return MaterialApp(",
+                  """return MaterialApp(
             builder: (context, child) {
               return Stack(
                 children: [
                   child ?? const SizedBox.shrink(),
+
                   const Positioned(
                     top: 42,
                     left: 0,
@@ -483,16 +503,16 @@ workflows:
                 ],
               );
             },
+
             // ROBOT_EYES_OVERLAY_ADDED
           """,
-                      1,
-                  )
+                  1,
+              )
 
-              else:
-                  print(
-                      "MaterialApp constructor was not found. "
-                      "Robot eyes widget was created but not injected."
-                  )
+          else:
+
+              if import_line not in s:
+                  s = import_line + "\n" + s
 
           p.write_text(s)
 
@@ -518,6 +538,35 @@ workflows:
           echo "pubspec.yaml: OK"
           echo "lib/main.dart: OK"
           echo "lib/widgets/robot_eyes.dart: OK"
+
+          echo "=== VERIFYING ROBOT EYES IMPORT ==="
+
+          grep -Fq \
+            "import 'widgets/robot_eyes.dart';" \
+            lib/main.dart
+
+          echo "Robot eyes import: OK"
+
+          echo "=== VERIFYING ROBOT EYES USAGE ==="
+
+          grep -Fq \
+            "RobotEyes(size: 82)" \
+            lib/main.dart
+
+          echo "Robot eyes usage: OK"
+
+          echo "=== VERIFYING MODERN OPACITY API ==="
+
+          if grep -R "withOpacity" lib/widgets/robot_eyes.dart; then
+            echo "ERROR: withOpacity still exists."
+            exit 1
+          fi
+
+          grep -Fq \
+            "withValues(alpha:" \
+            lib/widgets/robot_eyes.dart
+
+          echo "Modern opacity API: OK"
 
           if [ -d lib ]; then
             echo "=== LIB DIRECTORY ==="
