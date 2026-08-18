@@ -215,16 +215,34 @@ workflows:
 
           echo "=== FIXING UNUSED IMPORTS ==="
 
-          if [ -f lib/main.dart ]; then
-            sed -i "/^import 'dart:typed_data';$/d" lib/main.dart
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
 
-          if [ -f lib/services/voice_service.dart ]; then
-            sed -i "/^import 'package:record\/record.dart';$/d" \
-              lib/services/voice_service.dart
-          fi
+          files_and_imports = {
+              Path("lib/main.dart"): "import 'dart:typed_data';",
+              Path("lib/services/voice_service.dart"):
+                  "import 'package:record/record.dart';",
+          }
 
-          echo "Unused imports removed."
+          for path, import_line in files_and_imports.items():
+              if not path.exists():
+                  continue
+
+              lines = path.read_text().splitlines()
+
+              new_lines = [
+                  line for line in lines
+                  if line.strip() != import_line
+              ]
+
+              path.write_text(
+                  "\n".join(new_lines) + "\n"
+              )
+
+              print(f"Checked: {path}")
+
+          print("Unused imports removed successfully.")
+          PY
 
 
       - name: Verify Dart files
